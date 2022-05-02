@@ -35,9 +35,7 @@ public class ImplementationContainer {
         }
 
         if (implementationClassSet.size() == 1) {
-            return implementationClassSet.stream()
-                    .findFirst()
-                    .get();
+            return implementationClassSet.iterator().next();
         }
 
         String searchFactor = (qualifier == null || qualifier.trim().length() == 0) ? autowiredFieldName : qualifier;
