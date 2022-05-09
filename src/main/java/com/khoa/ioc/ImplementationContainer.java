@@ -28,6 +28,12 @@ public class ImplementationContainer {
      * @return
      */
     public Class<?> getImplementationClass(Class<?> interfaceClass, String autowiredFieldName, String qualifier) {
+        String searchFactor = (qualifier == null || qualifier.trim().length() == 0) ? autowiredFieldName : qualifier;
+
+        return getImplementationClass(interfaceClass, searchFactor);
+    }
+
+    public Class<?> getImplementationClass(Class<?> interfaceClass, String beanName) {
         Set<Class<?>> implementationClassSet = interfaceImplementationsMap.get(interfaceClass);
 
         if (implementationClassSet == null || implementationClassSet.isEmpty()) {
@@ -38,10 +44,8 @@ public class ImplementationContainer {
             return implementationClassSet.iterator().next();
         }
 
-        String searchFactor = (qualifier == null || qualifier.trim().length() == 0) ? autowiredFieldName : qualifier;
-
         return implementationClassSet.stream()
-                .filter(clazz -> clazz.getSimpleName().equals(searchFactor))
+                .filter(clazz -> clazz.getSimpleName().equals(beanName))
                 .findFirst()
                 .orElseThrow(() -> new IoCException("There are " + implementationClassSet.size()
                         + " of interface " + interfaceClass.getName()

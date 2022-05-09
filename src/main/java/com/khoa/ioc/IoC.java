@@ -1,17 +1,14 @@
 package com.khoa.ioc;
 
-import com.khoa.ioc.annotation.Bean;
-import com.khoa.ioc.annotation.Component;
-import com.khoa.ioc.annotation.ComponentScan;
-import com.khoa.ioc.annotation.Configuration;
+import com.khoa.ioc.annotation.*;
 import com.khoa.ioc.exception.IoCException;
 import com.khoa.ioc.loader.IoCClassLoader;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Parameter;
-import java.util.*;
+import java.lang.reflect.*;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class IoC {
@@ -20,6 +17,7 @@ public class IoC {
 
     /**
      * Scan and initiate beans
+     *
      * @param mainClass
      * @param predefinedBeans
      * @return
@@ -69,23 +67,92 @@ public class IoC {
         while (!configurationClassQueue.isEmpty()) {
             // Create configuration object. Considered as a Component
             Class<?> configurationClass = configurationClassQueue.removeFirst();
-            Constructor<?>[] constructors = configurationClass.getConstructors();
-
-            if (constructors.length == 0) {
-                throw new IoCException("There is no public constructor for class " + configurationClass + ". Invalid to init.");
+            try {
+                this.tryInitBeanConfigurationClass(configurationClass);
+            } catch (Exception e) {
+                configurationClassQueue.addLast(configurationClass);
             }
-
-            if (constructors.length > 1) {
-                throw new IoCException("There are " + constructors.length + " constructors for class " + configurationClass
-                        + ". Can't define which one need to be chosen to be init.");
-            }
-
-            Parameter[] parameters = constructors[0].getParameters();
-
-            // TODO: init required parameter. Seems like a recursive job
-
-
         }
+    }
+
+    private void tryInitBeanConfigurationClass(Class<?> configurationClass) throws IllegalAccessException, InvocationTargetException {
+        _initBean(configurationClass, null, configurationClass.getSimpleName());
+
+        // Init fields in Configuration object
+        Object configurationObject = beanContainer.getBean(configurationClass, configurationClass.getSimpleName());
+        List<Field> autowiredFields = Arrays.stream(configurationClass.getDeclaredFields())
+                .filter(field -> field.isAnnotationPresent(Autowired.class))
+                .collect(Collectors.toList());
+
+        for (Field autowiredField : autowiredFields) {
+            String qualifier = autowiredField.isAnnotationPresent(Qualifier.class) ? autowiredField.getAnnotation(Qualifier.class).value() : null;
+
+            _initBean(autowiredField.getType(), autowiredField.getAnnotation(Qualifier.class), autowiredField.getName());
+            Object fieldInstance = beanContainer.getBean(autowiredField.getType(), qualifier != null ? qualifier : autowiredField.getName());
+            autowiredField.set(configurationObject, fieldInstance);
+        }
+
+        List<Method> methods = Arrays.stream(configurationClass.getMethods())
+                .filter(method -> method.isAnnotationPresent(Bean.class))
+                .collect(Collectors.toList());
+
+        for (Method method : methods) {
+            Class<?> beanType = method.getReturnType();
+            Object beanInstance = method.invoke(configurationObject);
+            String name = method.getAnnotation(Bean.class).value() != null ?
+                    method.getAnnotation(Bean.class).value() : beanType.getName();
+            beanContainer.putBean(beanType, beanInstance, name);
+        }
+    }
+
+    // Init class type instance and put in BeanContainer
+    private void _initBean(Class<?> type, Qualifier qualifier, String variableName) {
+        String beanName = qualifier != null ? qualifier.value() : variableName;
+        if (beanContainer.containsBean(type, beanName)) {
+            return;
+        }
+
+        Class<?> beanType = implementationContainer.getImplementationClass(type, beanName);
+
+        Constructor<?>[] constructors = beanType.getConstructors();
+
+        if (constructors.length == 0) {
+            throw new IoCException("There is no public constructor for class " + beanType + ". Invalid to init.");
+        }
+
+        if (constructors.length > 1) {
+            throw new IoCException("There are " + constructors.length + " constructors for class " + beanType
+                    + ". Can't define which one need to be chosen to be init.");
+        }
+
+        Object instance;
+        try {
+            Parameter[] parameters = constructors[0].getParameters();
+            if (parameters.length == 0) {
+                instance = beanType.getConstructor().newInstance();
+            } else {
+                for (Parameter parameter : parameters) {
+                    Class<?> parameterType = parameter.getType();
+                    Qualifier parameterAnnotation = parameter.getAnnotation(Qualifier.class);
+                    String parameterName = parameter.getName();
+
+                    _initBean(parameterType, parameterAnnotation, parameterName);
+                }
+
+                Class<?>[] parameterClasses = Arrays.stream(parameters)
+                        .map(Parameter::getClass).toArray(Class<?>[]::new);
+
+                Object[] parameterObjects = Arrays.stream(parameterClasses)
+                        .map(this::getBean)
+                        .toArray(Object[]::new);
+
+                instance = beanType.getConstructor(parameterClasses).newInstance(parameterObjects);
+            }
+        } catch (Exception e) {
+            throw new IoCException("Error when init bean with type = " + beanType + ", qualifier = " + qualifier + ", name = " + variableName);
+        }
+
+        beanContainer.putBean(beanType, instance, beanName);
     }
 
     private void scanAndRegisterImplementations(List<Class<?>> classesInPackage) {
@@ -144,6 +211,7 @@ public class IoC {
 
     /**
      * Get bean by Class
+     *
      * @param clazz
      * @param <T>
      * @return
