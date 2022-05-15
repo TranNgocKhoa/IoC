@@ -52,7 +52,8 @@ public class IoC {
         // get classes in package name
         List<Class<?>> classesInPackage = IoCClassLoader.getInstance().getClassesInPackage(packageName);
         // init implementation container by @Component and @Bean in @Configuration classes
-        this.scanAndRegisterImplementations(classesInPackage);
+        ImplementationRegister.getInstance()
+                .register(classesInPackage, implementationContainer);
         // init beans in @Configuration classes
         this.initConfigurationDeclaredBeans(classesInPackage);
         // init beans from @Component classes
@@ -87,7 +88,7 @@ public class IoC {
         for (Field autowiredField : autowiredFields) {
             String qualifier = autowiredField.isAnnotationPresent(Qualifier.class) ? autowiredField.getAnnotation(Qualifier.class).value() : null;
 
-            _initBean(autowiredField.getType(), autowiredField.getAnnotation(Qualifier.class), autowiredField.getName());
+            this._initBean(autowiredField.getType(), autowiredField.getAnnotation(Qualifier.class), autowiredField.getName());
             Object fieldInstance = beanContainer.getBean(autowiredField.getType(), qualifier != null ? qualifier : autowiredField.getName());
             autowiredField.set(configurationObject, fieldInstance);
         }
@@ -97,12 +98,34 @@ public class IoC {
                 .collect(Collectors.toList());
 
         for (Method method : methods) {
-            Class<?> beanType = method.getReturnType();
-            Object beanInstance = method.invoke(configurationObject);
-            String name = method.getAnnotation(Bean.class).value() != null ?
-                    method.getAnnotation(Bean.class).value() : beanType.getName();
-            beanContainer.putBean(beanType, beanInstance, name);
+            this._initBeanMethod(configurationObject, method);
         }
+    }
+
+    private void _initBeanMethod(Object configurationObject, Method beanAnnotatedMethod) throws IllegalAccessException, InvocationTargetException {
+        Class<?> beanType = beanAnnotatedMethod.getReturnType();
+        Parameter[] parameters = beanAnnotatedMethod.getParameters();
+
+        if (parameters.length == 0) {
+            Object beanInstance = beanAnnotatedMethod.invoke(configurationObject);
+            String name = beanAnnotatedMethod.getAnnotation(Bean.class).value() != null ?
+                    beanAnnotatedMethod.getAnnotation(Bean.class).value() : beanType.getName();
+            beanContainer.putBean(beanType, beanInstance, name);
+        } else {
+            for (Parameter parameter : parameters) {
+                this._initBean(parameter.getType(), parameter.getAnnotation(Qualifier.class), parameter.getType().getName());
+            }
+        }
+
+        Object[] parameterObjects = Arrays.stream(parameters)
+                .map(Parameter::getType)
+                .map(this::getBean)
+                .toArray(Object[]::new);
+
+        Object beanInstance = beanAnnotatedMethod.invoke(configurationObject, parameterObjects);
+        String name = beanAnnotatedMethod.getAnnotation(Bean.class).value() != null ?
+                beanAnnotatedMethod.getAnnotation(Bean.class).value() : beanType.getName();
+        beanContainer.putBean(beanType, beanInstance, name);
     }
 
     // Init class type instance and put in BeanContainer
@@ -115,15 +138,7 @@ public class IoC {
         Class<?> beanType = implementationContainer.getImplementationClass(type, beanName);
 
         Constructor<?>[] constructors = beanType.getConstructors();
-
-        if (constructors.length == 0) {
-            throw new IoCException("There is no public constructor for class " + beanType + ". Invalid to init.");
-        }
-
-        if (constructors.length > 1) {
-            throw new IoCException("There are " + constructors.length + " constructors for class " + beanType
-                    + ". Can't define which one need to be chosen to be init.");
-        }
+        this.validateConstructor(beanType, constructors);
 
         Object instance;
         try {
@@ -134,13 +149,13 @@ public class IoC {
                 for (Parameter parameter : parameters) {
                     Class<?> parameterType = parameter.getType();
                     Qualifier parameterAnnotation = parameter.getAnnotation(Qualifier.class);
-                    String parameterName = parameter.getName();
+                    String parameterName = parameter.getType().getName();
 
                     _initBean(parameterType, parameterAnnotation, parameterName);
                 }
 
                 Class<?>[] parameterClasses = Arrays.stream(parameters)
-                        .map(Parameter::getClass).toArray(Class<?>[]::new);
+                        .map(Parameter::getType).toArray(Class<?>[]::new);
 
                 Object[] parameterObjects = Arrays.stream(parameterClasses)
                         .map(this::getBean)
@@ -155,41 +170,14 @@ public class IoC {
         beanContainer.putBean(beanType, instance, beanName);
     }
 
-    private void scanAndRegisterImplementations(List<Class<?>> classesInPackage) {
-        List<Class<?>> componentClasses = classesInPackage.stream()
-                .filter(aClass -> aClass.isAnnotationPresent(Component.class))
-                .collect(Collectors.toList());
-        this.registerImplementationsForComponent(componentClasses);
-
-        List<Class<?>> configurationClasses = classesInPackage.stream()
-                .filter(aClass -> aClass.isAnnotationPresent(Configuration.class))
-                .collect(Collectors.toList());
-        this.registerImplementationForBeansInConfigurationClasses(configurationClasses);
-    }
-
-    private void registerImplementationForBeansInConfigurationClasses(List<Class<?>> configurationClasses) {
-        for (Class<?> configurationClass : configurationClasses) {
-            List<Method> beanMethods = Arrays.stream(configurationClass.getMethods())
-                    .filter(method -> method.getAnnotation(Bean.class) != null)
-                    .collect(Collectors.toList());
-
-            for (Method method : beanMethods) {
-                Class<?> returnType = method.getReturnType();
-                implementationContainer.putImplementationClass(returnType, returnType);
-            }
+    private void validateConstructor(Class<?> beanType, Constructor<?>[] constructors) {
+        if (constructors.length == 0) {
+            throw new IoCException("There is no public constructor for class " + beanType + ". Invalid to init.");
         }
-    }
 
-    private void registerImplementationsForComponent(List<Class<?>> componentClasses) {
-        for (Class<?> implementationClass : componentClasses) {
-            Class<?>[] interfaces = implementationClass.getInterfaces();
-            if (interfaces.length == 0) {
-                implementationContainer.putImplementationClass(implementationClass, implementationClass);
-            } else {
-                for (Class<?> interfaceClass : interfaces) {
-                    implementationContainer.putImplementationClass(interfaceClass, implementationClass);
-                }
-            }
+        if (constructors.length > 1) {
+            throw new IoCException("There are " + constructors.length + " constructors for class " + beanType
+                    + ". Can't define which one need to be chosen to be init.");
         }
     }
 
@@ -217,7 +205,7 @@ public class IoC {
      * @return
      */
     public <T> T getBean(Class<T> clazz) {
-        return null;
+        return beanContainer.getBean(clazz);
     }
 
 

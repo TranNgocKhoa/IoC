@@ -5,23 +5,24 @@ import com.khoa.ioc.exception.IoCClassLoaderException;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class IoCClassLoader {
     private static IoCClassLoader INSTANCE;
 
     public static IoCClassLoader getInstance() {
         if (INSTANCE != null) {
-            return getInstance();
+            return INSTANCE;
         }
 
         synchronized (IoCClassLoader.class) {
             if (INSTANCE != null) {
                 return INSTANCE;
             }
+            INSTANCE = new IoCClassLoader();
 
-            return new IoCClassLoader();
+            return INSTANCE;
         }
     }
 
@@ -37,11 +38,24 @@ public class IoCClassLoader {
         }
 
         BufferedReader classReader = new BufferedReader(new InputStreamReader(classStream));
+        List<Class<?>> classesInPackage = new ArrayList<>();
 
-        return classReader.lines()
-                .filter(className -> className.endsWith(".class"))
-                .map(className -> getClass(className, packageName))
-                .collect(Collectors.toList());
+        classReader.lines()
+                .forEach(fileName -> this.processSubFile(packageName, classesInPackage, fileName));
+
+        return classesInPackage;
+    }
+
+    private void processSubFile(String packageName, List<Class<?>> classesInPackage, String fileName) {
+        if (fileName.endsWith(".class")) {
+            classesInPackage.add(getClass(fileName, packageName));
+        } else {
+            List<Class<?>> classesInSubPackage = this.getClassesInPackage(packageName + "." + fileName);
+
+            if (!classesInSubPackage.isEmpty()) {
+                classesInPackage.addAll(classesInSubPackage);
+            }
+        }
     }
 
     private Class<?> getClass(String className, String packageName) {

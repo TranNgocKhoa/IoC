@@ -15,7 +15,7 @@ public class BeanContainer {
 
     public void putBean(Class<?> clazz, Object instance, String name) {
         Map<String, Object> beansByClassMap = beans.computeIfAbsent(clazz, key -> new HashMap<>());
-        if (beansByClassMap.get(name) != null) {
+        if (beansByClassMap.get(name) == null) {
             beansByClassMap.put(name, instance);
         } else {
             throw new IoCException("Bean with type " + clazz + " and name " + name + " is already registered.");
@@ -54,7 +54,7 @@ public class BeanContainer {
     }
 
     public <T> boolean containsBean(Class<T> clazz, String name) {
-        return Optional.of(beans.get(clazz))
+        return Optional.ofNullable(beans.get(clazz))
                 .map(beanByClassMap -> beanByClassMap.get(name))
                 .map(o -> getBeanExtractType(clazz, o))
                 .isPresent();
