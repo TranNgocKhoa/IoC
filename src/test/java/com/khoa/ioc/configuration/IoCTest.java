@@ -15,4 +15,22 @@ public class IoCTest {
 
         bean.check();
     }
+
+    @Test
+    void testMember() {
+        ioC = IoC.initBeans(IoCTest.class);
+
+        Connector bean = ioC.getBean(Connector.class);
+
+        bean.check();
+    }
+
+    @Test
+    void testMultipleSourceBean() {
+        ioC = IoC.initBeans(IoCTest.class);
+
+        SmartPhoneWithAdapter bean = ioC.getBean(SmartPhoneWithAdapter.class);
+
+        bean.check();
+    }
 }

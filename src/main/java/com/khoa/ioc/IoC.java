@@ -1,6 +1,7 @@
 package com.khoa.ioc;
 
 import com.khoa.ioc.annotation.*;
+import com.khoa.ioc.exception.InitBeanMethodException;
 import com.khoa.ioc.exception.IoCException;
 import com.khoa.ioc.loader.IoCClassLoader;
 
@@ -93,12 +94,25 @@ public class IoC {
             autowiredField.set(configurationObject, fieldInstance);
         }
 
-        List<Method> methods = Arrays.stream(configurationClass.getMethods())
+        Deque<Method> beanMethodQueue = new ArrayDeque<>();
+        Arrays.stream(configurationClass.getMethods())
                 .filter(method -> method.isAnnotationPresent(Bean.class))
-                .collect(Collectors.toList());
+                .forEach(beanMethodQueue::add);
 
-        for (Method method : methods) {
-            this._initBeanMethod(configurationObject, method);
+        int totalMethods = beanMethodQueue.size();
+        int count = 0;
+        while (!beanMethodQueue.isEmpty()) {
+            Method beanMethod = beanMethodQueue.removeFirst();
+            try {
+                this._initBeanMethod(configurationObject, beanMethod);
+            } catch (InitBeanMethodException e) {
+                count++;
+                beanMethodQueue.addLast(beanMethod);
+
+                if (count > totalMethods) {
+                    throw new IoCException("Can't init some @Bean method at the moment.");
+                }
+            }
         }
     }
 
@@ -106,10 +120,15 @@ public class IoC {
         Class<?> beanType = beanAnnotatedMethod.getReturnType();
         Parameter[] parameters = beanAnnotatedMethod.getParameters();
 
+        String name = !beanAnnotatedMethod.getAnnotation(Bean.class).value().isEmpty() ?
+                beanAnnotatedMethod.getAnnotation(Bean.class).value() : beanType.getName();
+
+        if (beanContainer.containsBean(beanAnnotatedMethod.getReturnType(), name)) {
+            return;
+        }
+
         if (parameters.length == 0) {
             Object beanInstance = beanAnnotatedMethod.invoke(configurationObject);
-            String name = beanAnnotatedMethod.getAnnotation(Bean.class).value() != null ?
-                    beanAnnotatedMethod.getAnnotation(Bean.class).value() : beanType.getName();
             beanContainer.putBean(beanType, beanInstance, name);
         } else {
             for (Parameter parameter : parameters) {
@@ -123,8 +142,7 @@ public class IoC {
                 .toArray(Object[]::new);
 
         Object beanInstance = beanAnnotatedMethod.invoke(configurationObject, parameterObjects);
-        String name = beanAnnotatedMethod.getAnnotation(Bean.class).value() != null ?
-                beanAnnotatedMethod.getAnnotation(Bean.class).value() : beanType.getName();
+        
         beanContainer.putBean(beanType, beanInstance, name);
     }
 
@@ -136,6 +154,10 @@ public class IoC {
         }
 
         Class<?> beanType = implementationContainer.getImplementationClass(type, beanName);
+
+        if (!beanType.isAnnotationPresent(Component.class) && !beanType.isAnnotationPresent(Configuration.class)) {
+            throw new InitBeanMethodException("Can't create bean with type: " + beanType + " at this moment.");
+        }
 
         Constructor<?>[] constructors = beanType.getConstructors();
         this.validateConstructor(beanType, constructors);
