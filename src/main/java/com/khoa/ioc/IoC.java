@@ -58,6 +58,24 @@ public class IoC {
         // init beans in @Configuration classes
         this.initConfigurationDeclaredBeans(classesInPackage);
         // init beans from @Component classes
+        this.initComponentClassBean(classesInPackage);
+    }
+
+    private void initComponentClassBean(List<Class<?>> classesInPackage) {
+        Deque<Class<?>> componentClassQueue = new ArrayDeque<>();
+        classesInPackage.stream()
+                .filter(aClass -> aClass.isAnnotationPresent(Component.class))
+                .forEach(componentClassQueue::add);
+
+        while (!componentClassQueue.isEmpty()) {
+            // Create configuration object. Considered as a Component
+            Class<?> configurationClass = componentClassQueue.removeFirst();
+            try {
+                this.tryInitBeanConfigurationClass(configurationClass);
+            } catch (Exception e) {
+                componentClassQueue.addLast(configurationClass);
+            }
+        }
     }
 
     private void initConfigurationDeclaredBeans(List<Class<?>> classesInPackage) {
