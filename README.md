@@ -2,7 +2,7 @@
 
 This is a simple implementation of an IoC library.
 I use Java reflection in project.
-Maybe in the future, I will research about implementing a IoC library that provides dependency injection with [no runtime overhead](https://rskupnik.github.io/dependency-injection-in-pet-project-dagger2).
+Maybe in the future, I will research about implementing an IoC library that provides dependency injection with [no runtime overhead](https://rskupnik.github.io/dependency-injection-in-pet-project-dagger2).
 
 ## Usage
 
